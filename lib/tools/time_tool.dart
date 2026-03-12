@@ -44,6 +44,30 @@ class TimeTool {
     }
   }
 
+  static String floatingTimeLabel(int? ms) {
+    if (ms == null) {
+      return "";
+    }
+
+    DateTime date = DateTime.fromMillisecondsSinceEpoch(ms);
+    DateTime now = DateTime.now();
+    String formattedDate = DateFormat('yyyy-MM-dd').format(date);
+    String today = DateFormat('yyyy-MM-dd').format(now);
+    String yesterday =
+    DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
+
+    String dateLabel;
+    if (formattedDate == today) {
+      dateLabel = "TODAY";
+    } else if (formattedDate == yesterday) {
+      dateLabel = "YESTERDAY";
+    } else {
+      dateLabel = DateFormat('MMM dd, yyyy').format(date);
+    }
+
+    return "$dateLabel  ${DateFormat('hh:mm a').format(date)}";
+  }
+
 
   static String durationStr(int duration) {
     if (duration <= 60) {

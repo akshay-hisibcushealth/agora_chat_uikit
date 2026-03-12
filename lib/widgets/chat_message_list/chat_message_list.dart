@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:agora_chat_uikit/internal/chat_method.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -23,11 +25,11 @@ class ChatMessageListController extends ChatBaseController {
   /// Param [didRecallMessage] The message recall callback, executed when the message is recalled,
   ///
   ChatMessageListController(
-    this.conversation, {
-    this.enableReadAck = true,
-    this.didRecallMessage,
-    super.key,
-  });
+      this.conversation, {
+        this.enableReadAck = true,
+        this.didRecallMessage,
+        super.key,
+      });
 
   /// The message recall callback, executed when the message is recalled,
   /// You can return a message that the sdk inserts into the local database.
@@ -85,8 +87,8 @@ class ChatMessageListController extends ChatBaseController {
   ///
   /// Param [message] The message to recall.
   Future<void> recallMessage(
-    ChatMessage message,
-  ) async {
+      ChatMessage message,
+      ) async {
     try {
       await chatClient.chatManager.recallMessage(message.msgId);
       _recallMessagesCallback([message]);
@@ -166,15 +168,15 @@ class ChatMessageListController extends ChatBaseController {
         await conversation.insertMessage(message);
         List models = msgList
             .getRange(
-              msgList.indexWhere(
+          msgList.indexWhere(
                   (element) => element.message.serverTime > message.serverTime),
-              msgList.indexWhere(
+          msgList.indexWhere(
                   (element) => element.message.serverTime < message.serverTime),
-            )
+        )
             .toList();
         if (models.isNotEmpty) {
           int index = msgList.indexWhere(
-              (element) => element.message.serverTime > message.serverTime);
+                  (element) => element.message.serverTime > message.serverTime);
           ChatMessageListItemModel model = _modelCreator(message);
           msgList.insert(index + 1, model);
           _hasMore = false;
@@ -369,7 +371,7 @@ class ChatMessageListController extends ChatBaseController {
     if (_latestShowTsTime < 0) {
       needShowTs = true;
     } else if (DateTime.fromMillisecondsSinceEpoch(message.serverTime).day !=
-            DateTime.fromMillisecondsSinceEpoch(_latestShowTsTime).day &&
+        DateTime.fromMillisecondsSinceEpoch(_latestShowTsTime).day &&
         message.serverTime > _latestShowTsTime) {
       needShowTs = true;
     }
@@ -482,6 +484,10 @@ class ChatMessagesList extends StatefulWidget {
 class _ChatMessagesListState extends State<ChatMessagesList>
     with WidgetsBindingObserver {
   final ScrollController _scrollController = ScrollController();
+  final Map<String, GlobalKey> _messageKeys = {};
+  Timer? _floatingTimeHideTimer;
+  String _floatingTimeText = '';
+  bool _showFloatingTime = false;
 
   @override
   void initState() {
@@ -507,6 +513,7 @@ class _ChatMessagesListState extends State<ChatMessagesList>
 
   @override
   void dispose() {
+    _floatingTimeHideTimer?.cancel();
     _scrollController.dispose();
     widget.messageListViewController.dispose();
     super.dispose();
@@ -532,6 +539,92 @@ class _ChatMessagesListState extends State<ChatMessagesList>
       widget.messageListViewController.loadMoreMessage();
     }
     widget.needDismissInputWidgetAction?.call();
+    _showFloatingTimeIndicator();
+  }
+
+  GlobalKey _messageKey(String messageId) {
+    return _messageKeys.putIfAbsent(messageId, GlobalKey.new);
+  }
+
+  void _showFloatingTimeIndicator() {
+    _updateFloatingTimeText();
+
+    if (!_showFloatingTime && mounted) {
+      setState(() {
+        _showFloatingTime = true;
+      });
+    }
+
+    _floatingTimeHideTimer?.cancel();
+    _floatingTimeHideTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _showFloatingTime = false;
+      });
+    });
+  }
+
+  void _updateFloatingTimeText() {
+    final RenderObject? viewportObject = context.findRenderObject();
+    if (viewportObject is! RenderBox) {
+      return;
+    }
+
+    final List<ChatMessageListItemModel> list =
+        widget.messageListViewController.msgList;
+    if (list.isEmpty) {
+      return;
+    }
+
+    final double viewportTop = viewportObject.localToGlobal(Offset.zero).dy;
+    final double viewportBottom = viewportTop + viewportObject.size.height;
+
+    ChatMessageListItemModel? visibleModel;
+    double? bestDistance;
+
+    for (final model in list) {
+      final key = _messageKeys[model.msgId];
+      final BuildContext? itemContext = key?.currentContext;
+      if (itemContext == null) {
+        continue;
+      }
+
+      final RenderObject? itemObject = itemContext.findRenderObject();
+      if (itemObject is! RenderBox || !itemObject.hasSize) {
+        continue;
+      }
+
+      final double itemTop = itemObject.localToGlobal(Offset.zero).dy;
+      final double itemBottom = itemTop + itemObject.size.height;
+      final bool isVisible =
+          itemBottom > viewportTop + 8 && itemTop < viewportBottom;
+
+      if (!isVisible) {
+        continue;
+      }
+
+      final double distanceFromTop =
+          ((itemTop < viewportTop) ? viewportTop : itemTop) - viewportTop;
+
+      if (bestDistance == null || distanceFromTop < bestDistance) {
+        bestDistance = distanceFromTop;
+        visibleModel = model;
+      }
+    }
+
+    if (visibleModel == null) {
+      return;
+    }
+
+    final String nextLabel =
+    TimeTool.floatingTimeLabel(visibleModel.message.serverTime);
+    if (nextLabel != _floatingTimeText && mounted) {
+      setState(() {
+        _floatingTimeText = nextLabel;
+      });
+    }
   }
 
   @override
@@ -552,7 +645,7 @@ class _ChatMessagesListState extends State<ChatMessagesList>
       slivers: [
         ChatMessageSliver(
           delegate: SliverChildBuilderDelegate(
-            (context, index) {
+                (context, index) {
               return messageWidget(list[index]);
             },
             childCount: list.length,
@@ -577,6 +670,35 @@ class _ChatMessagesListState extends State<ChatMessagesList>
       children: [
         widget.background ?? Container(),
         content,
+        Positioned(
+          top: 12,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 180),
+              opacity:
+              _showFloatingTime && _floatingTimeText.isNotEmpty ? 1 : 0,
+              child: Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xCC1F2937),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Padding(
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: Text(
+                      _floatingTimeText,
+                      style: ChatUIKit.of(context)?.theme.dayDividerTextStyle ??
+                          const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
     );
 
@@ -599,7 +721,7 @@ class _ChatMessagesListState extends State<ChatMessagesList>
     ValueKey<String>? valueKey; //ValueKey(message.msgId);
 
     Widget content = widget.itemBuilder?.call(context, model) ??
-        () {
+            () {
           if (message.body.type == MessageType.TXT) {
             return ChatMessageListTextItem(
               key: valueKey,
@@ -628,7 +750,7 @@ class _ChatMessagesListState extends State<ChatMessagesList>
             );
           } else if (message.body.type == MessageType.FILE) {
             return GestureDetector(
-              onTap: (){
+              onTap: () {
                 chatClient.chatManager.downloadAttachment(message);
               },
               child: ChatMessageListFileItem(
@@ -660,17 +782,20 @@ class _ChatMessagesListState extends State<ChatMessagesList>
               unreadFlagBuilder: message.hasRead
                   ? null
                   : (_) => Container(
-                      clipBehavior: Clip.hardEdge,
-                      decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(30),
-                          color: Colors.pink),
-                      width: 10,
-                      height: 10),
+                  clipBehavior: Clip.hardEdge,
+                  decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(30),
+                      color: Colors.pink),
+                  width: 10,
+                  height: 10),
             );
           }
           return Container();
         }();
 
-    return content;
+    return KeyedSubtree(
+      key: _messageKey(model.msgId),
+      child: content,
+    );
   }
 }
