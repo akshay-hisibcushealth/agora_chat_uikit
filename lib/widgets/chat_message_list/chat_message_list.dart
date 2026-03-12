@@ -484,10 +484,12 @@ class ChatMessagesList extends StatefulWidget {
 class _ChatMessagesListState extends State<ChatMessagesList>
     with WidgetsBindingObserver {
   final ScrollController _scrollController = ScrollController();
+  final GlobalKey _viewportKey = GlobalKey();
   final Map<String, GlobalKey> _messageKeys = {};
   Timer? _floatingTimeHideTimer;
   String _floatingTimeText = '';
   bool _showFloatingTime = false;
+  bool _floatingTimeFrameScheduled = false;
 
   @override
   void initState() {
@@ -547,13 +549,13 @@ class _ChatMessagesListState extends State<ChatMessagesList>
   }
 
   void _showFloatingTimeIndicator() {
-    _updateFloatingTimeText();
-
     if (!_showFloatingTime && mounted) {
       setState(() {
         _showFloatingTime = true;
       });
     }
+
+    _scheduleFloatingTimeUpdate();
 
     _floatingTimeHideTimer?.cancel();
     _floatingTimeHideTimer = Timer(const Duration(milliseconds: 900), () {
@@ -566,8 +568,24 @@ class _ChatMessagesListState extends State<ChatMessagesList>
     });
   }
 
+  void _scheduleFloatingTimeUpdate() {
+    if (_floatingTimeFrameScheduled) {
+      return;
+    }
+
+    _floatingTimeFrameScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _floatingTimeFrameScheduled = false;
+      if (!mounted) {
+        return;
+      }
+      _updateFloatingTimeText();
+    });
+  }
+
   void _updateFloatingTimeText() {
-    final RenderObject? viewportObject = context.findRenderObject();
+    final BuildContext? viewportContext = _viewportKey.currentContext;
+    final RenderObject? viewportObject = viewportContext?.findRenderObject();
     if (viewportObject is! RenderBox) {
       return;
     }
@@ -637,21 +655,24 @@ class _ChatMessagesListState extends State<ChatMessagesList>
           child: SvgPicture.asset("assets/images/svgs/no_conversation.svg"));
     }
 
-    Widget content = CustomScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      controller: _scrollController,
-      cacheExtent: 1500,
-      reverse: true,
-      slivers: [
-        ChatMessageSliver(
-          delegate: SliverChildBuilderDelegate(
-                (context, index) {
-              return messageWidget(list[index]);
-            },
-            childCount: list.length,
+    Widget content = KeyedSubtree(
+      key: _viewportKey,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        controller: _scrollController,
+        cacheExtent: 1500,
+        reverse: true,
+        slivers: [
+          ChatMessageSliver(
+            delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                return messageWidget(list[index]);
+              },
+              childCount: list.length,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
 
     if (widget.enableScrollBar) {
